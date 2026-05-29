@@ -48,6 +48,12 @@ Expected residual warnings that can be tooling/environment related:
 
 * `POSSIBLE_DOWNREF` for active Internet-Draft references when status lookup fails.
 * `LINE_PI` from generated `<?line ...?>` processing instructions in markdown-to-XML workflows.
+* `INVALID_REFERENCES_NAME` when generated XML wraps normative and informative
+  references in a combined `References` section before the actual
+  `Normative References` and `Informative References` subsections.
+* `NON_ASCII_UTF8` as a review reminder. A source scan of the repo-authored
+  draft and support files should show whether any non-ASCII text was actually
+  introduced.
 
 For a printed checklist in terminal:
 

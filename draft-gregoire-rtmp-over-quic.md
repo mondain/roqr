@@ -27,6 +27,7 @@ author:
 normative:
   RFC9000: RFC9000
   RFC9001: RFC9001
+  RFC9002: RFC9002
   RFC9221: RFC9221
   RFC7301: RFC7301
   RTMP:
@@ -84,6 +85,7 @@ This specification defines:
 * A common RoQR frame format for QUIC streams and QUIC DATAGRAM frames.
 * Receiver behavior for decoding RTMP message metadata and payloads.
 * Guidance for choosing streams, DATAGRAM frames, or mixed operation.
+* Congestion-control and rate-adaptation guidance for RoQR senders.
 * Error codes for closing RoQR connections.
 
 This specification does not define:
@@ -296,18 +298,26 @@ ID field contains the RTMP chunk stream identifier associated with the original
 RTMP message.  The Payload Length field contains the number of octets in the
 Payload field.
 
+The Message Type, Message Stream ID, Chunk Stream ID, Timestamp, and Payload
+Length fields represent RTMP message metadata after chunk reassembly.  The
+Message Stream ID remains RTMP application state.  The Chunk Stream ID is
+preserved as metadata for implementations that use chunk-stream affinity, but
+RoQR does not require a receiver to recreate the sender's original RTMP chunk
+boundaries.
+
 The Payload field MUST contain exactly one complete RTMP message payload.  A
 sender MUST NOT split one RTMP message payload across multiple RoQR frames.  A
 sender MUST NOT concatenate multiple RTMP message payloads into one RoQR frame.
 The Payload Length field MUST be greater than zero.
 
-## Timestamp and Chunk Semantics {#timestamp-chunk-semantics}
+## RTMP Field Semantics {#rtmp-field-semantics}
 
-RoQR carries RTMP messages after RTMP chunk reassembly.  The RoQR Timestamp
-field carries the RTMP message timestamp in milliseconds as a QUIC
-variable-length integer.  It does not carry the three-octet timestamp field
-from an RTMP chunk header, and it does not carry the RTMP Extended Timestamp
-field as a separate field.
+This section defines timestamp, extended timestamp, message stream, chunk
+stream, and chunking semantics for RoQR.  RoQR carries RTMP messages after RTMP
+chunk reassembly.  The RoQR Timestamp field carries the RTMP message timestamp
+in milliseconds as a QUIC variable-length integer.  It does not carry the
+three-octet timestamp field from an RTMP chunk header, and it does not carry
+the RTMP Extended Timestamp field as a separate field.
 
 When translating chunked RTMP into RoQR, an endpoint MUST resolve RTMP
 timestamp and timestamp-delta encoding, including RTMP Extended Timestamp
@@ -419,7 +429,7 @@ the QUIC stream carrying the stale RoQR frame; it is not a request to tear down
 the RTMP application stream or retire the Flow ID unless the application also
 performs that teardown.
 
-# RTMP Message Type Handling
+# RTMP Message Type Handling {#rtmp-message-type-handling}
 
 RoQR preserves the RTMP message type identifier.  Receivers MUST pass unknown
 message type identifiers to the application together with the associated Flow
@@ -452,6 +462,8 @@ The following message type identifiers are common in RTMP media workflows:
 RTMP applications can use streams, DATAGRAM frames, or both on the same QUIC
 connection.  The choice is application-specific.  Ordering and loss behavior
 for these delivery modes is described in {{ordering-loss-handling}}.
+Congestion-control and rate-adaptation considerations are described in
+{{congestion-control}}.
 
 Applications SHOULD use QUIC streams for RTMP messages that are required for
 session correctness or decoder initialization.  Examples include command
@@ -467,6 +479,45 @@ Applications that use both delivery modes SHOULD define which RTMP message
 types and flows use each mode.  A receiver MUST be prepared to receive frames
 for different Flow IDs over different delivery modes on the same QUIC
 connection.
+
+# Congestion Control and Rate Adaptation {#congestion-control}
+
+RoQR relies on QUIC congestion control for network safety.  QUIC endpoints
+perform congestion control and loss recovery as specified by QUIC Recovery
+{{RFC9002}}.  RoQR senders MUST treat both QUIC streams and QUIC DATAGRAM
+frames as congestion-controlled transport.  QUIC DATAGRAM frames are not
+retransmitted by QUIC, but they remain subject to QUIC congestion control,
+pacing, path validation, and amplification limits.
+
+An RTMP application can produce media faster than the QUIC connection can send
+without building unacceptable latency.  When this happens, a RoQR sender SHOULD
+adapt the application media rate or delivery behavior.  Possible responses
+include reducing encoder bitrate, dropping stale DATAGRAM-carried media before
+submitting it to QUIC, switching selected media to a different delivery mode,
+or closing a flow that can no longer meet application latency requirements.
+
+Applications SHOULD avoid running a competing congestion controller above
+QUIC.  If an application has media-rate adaptation logic, it SHOULD use
+transport signals exposed by the QUIC implementation, such as congestion
+window, pacing rate, bytes in flight, stream backpressure, DATAGRAM send
+failures, observed round-trip time, delivery observations, and loss
+observations.  Applications that cannot access these signals can still bound
+latency by limiting per-flow queues and dropping stale media before transport
+submission.
+
+QUIC stream flow control and congestion control can cause reliable RoQR frames
+to queue behind earlier stream data.  Applications that carry media on streams
+SHOULD define a maximum useful media age.  If a stream-carried media frame
+becomes too old to be useful before delivery, an endpoint MAY reset or stop
+receiving the affected stream with the `FRAME_CANCELLED` error code, as
+described in {{ordering-loss-handling}}.
+
+When real-time media, RTMP commands, metadata, and non-real-time application
+data share one QUIC connection, an endpoint SHOULD define priority and
+bandwidth-allocation policy across Flow IDs and RTMP message classes.  Command
+and control messages that are required for session correctness need reliable
+delivery, but they SHOULD NOT be allowed to build unbounded queues that prevent
+the sender from adapting real-time media.
 
 # Error Handling
 

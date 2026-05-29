@@ -28,7 +28,7 @@ Run these after each task that changes the draft source:
 ```sh
 make latest
 make check-submission
-rg -n "draft-gregoire-avtcore-rtmp-over-quic|Audio/Video Transport Core Maintenance|workgroup:" . -g '!lib/**' -g '!node_modules/**' -g '!versioned/**' -g '!docs/draft-ietf-avtcore-rtp-over-quic-14.txt'
+rg -n "draft-gregoire-avtcore-rtmp-over-quic|Audio/Video Transport Core Maintenance|^workgroup:" draft-gregoire-rtmp-over-quic.md README.md CONTRIBUTING.md .github
 ```
 
 Expected:
@@ -693,7 +693,7 @@ Acknowledgments
 Run:
 
 ```sh
-rg -n "draft-gregoire-avtcore-rtmp-over-quic|Audio/Video Transport Core Maintenance|workgroup:" . -g '!lib/**' -g '!node_modules/**' -g '!versioned/**' -g '!docs/draft-ietf-avtcore-rtp-over-quic-14.txt'
+rg -n "draft-gregoire-avtcore-rtmp-over-quic|Audio/Video Transport Core Maintenance|^workgroup:" draft-gregoire-rtmp-over-quic.md README.md CONTRIBUTING.md .github
 ```
 
 Expected: no matches and exit code 1.
