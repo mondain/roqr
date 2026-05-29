@@ -1178,10 +1178,13 @@ latency-sensitive media messages.<a href="#section-abstract-1" class="pilcrow">�
                 <p id="section-toc.1-1.6.2.2.1"><a href="#section-6.2" class="auto internal xref">6.2</a>.  <a href="#name-roqr-frame-format" class="internal xref">RoQR Frame Format</a></p>
 </li>
               <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.6.2.3">
-                <p id="section-toc.1-1.6.2.3.1"><a href="#section-6.3" class="auto internal xref">6.3</a>.  <a href="#name-quic-streams" class="internal xref">QUIC Streams</a></p>
+                <p id="section-toc.1-1.6.2.3.1"><a href="#section-6.3" class="auto internal xref">6.3</a>.  <a href="#name-timestamp-and-chunk-semanti" class="internal xref">Timestamp and Chunk Semantics</a></p>
 </li>
               <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.6.2.4">
-                <p id="section-toc.1-1.6.2.4.1"><a href="#section-6.4" class="auto internal xref">6.4</a>.  <a href="#name-quic-datagram-frames" class="internal xref">QUIC DATAGRAM Frames</a></p>
+                <p id="section-toc.1-1.6.2.4.1"><a href="#section-6.4" class="auto internal xref">6.4</a>.  <a href="#name-quic-streams" class="internal xref">QUIC Streams</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.6.2.5">
+                <p id="section-toc.1-1.6.2.5.1"><a href="#section-6.5" class="auto internal xref">6.5</a>.  <a href="#name-quic-datagram-frames" class="internal xref">QUIC DATAGRAM Frames</a></p>
 </li>
             </ul>
 </li>
@@ -1489,36 +1492,77 @@ sender <span class="bcp14">MUST NOT</span> concatenate multiple RTMP message pay
 The Payload Length field <span class="bcp14">MUST</span> be greater than zero.<a href="#section-6.2-4" class="pilcrow">¶</a></p>
 </section>
 </div>
-<div id="quic-streams">
+<div id="timestamp-chunk-semantics">
 <section id="section-6.3">
-        <h3 id="name-quic-streams">
-<a href="#section-6.3" class="section-number selfRef">6.3. </a><a href="#name-quic-streams" class="section-name selfRef">QUIC Streams</a>
+        <h3 id="name-timestamp-and-chunk-semanti">
+<a href="#section-6.3" class="section-number selfRef">6.3. </a><a href="#name-timestamp-and-chunk-semanti" class="section-name selfRef">Timestamp and Chunk Semantics</a>
         </h3>
-<p id="section-6.3-1">When RoQR frames are sent over QUIC streams, the sender writes one or more RoQR
+<p id="section-6.3-1">RoQR carries RTMP messages after RTMP chunk reassembly.  The RoQR Timestamp
+field carries the RTMP message timestamp in milliseconds as a QUIC
+variable-length integer.  It does not carry the three-octet timestamp field
+from an RTMP chunk header, and it does not carry the RTMP Extended Timestamp
+field as a separate field.<a href="#section-6.3-1" class="pilcrow">¶</a></p>
+<p id="section-6.3-2">When translating chunked RTMP into RoQR, an endpoint <span class="bcp14">MUST</span> resolve RTMP
+timestamp and timestamp-delta encoding, including RTMP Extended Timestamp
+fields, before encoding the RoQR frame.  If an RTMP chunk uses the extended
+timestamp mechanism because the chunk timestamp or timestamp delta is greater
+than or equal to <code>0xFFFFFF</code>, the RoQR Timestamp field carries the resulting
+complete RTMP message timestamp value.  The <code>0xFFFFFF</code> chunk-header sentinel
+<span class="bcp14">MUST NOT</span> be preserved as a sentinel in RoQR.<a href="#section-6.3-2" class="pilcrow">¶</a></p>
+<p id="section-6.3-3">When translating RoQR back into chunked RTMP, an endpoint reconstructs RTMP
+chunk headers according to <span>[<a href="#RTMP" class="cite xref">RTMP</a>]</span>.  If the RoQR Timestamp value or the
+timestamp delta selected for a generated RTMP chunk cannot fit in the
+three-octet RTMP chunk timestamp or timestamp-delta field, the generated RTMP
+chunk uses the RTMP Extended Timestamp field as defined by <span>[<a href="#RTMP" class="cite xref">RTMP</a>]</span>.  This
+translation is local to the RTMP chunking layer and does not change the RoQR
+wire image.<a href="#section-6.3-3" class="pilcrow">¶</a></p>
+<p id="section-6.3-4">RoQR frames are message-oriented.  A RoQR frame payload contains one complete
+RTMP message payload after RTMP chunk reassembly.  RTMP chunk basic headers,
+RTMP chunk message headers, extended timestamp fields, and chunk-size
+boundaries are not serialized into the RoQR Payload field.  A sender <span class="bcp14">MUST NOT</span>
+split one RTMP message payload across multiple RoQR frames for the purpose of
+preserving RTMP chunk boundaries.<a href="#section-6.3-4" class="pilcrow">¶</a></p>
+<p id="section-6.3-5">The RoQR Chunk Stream ID field carries the RTMP chunk stream identifier
+associated with the source RTMP message.  It is retained for implementations
+that preserve RTMP chunk-stream affinity or use chunk stream identifiers as
+part of local RTMP session state.  RoQR does not require the receiver to
+reconstruct the same RTMP chunk boundaries that were present at the sender.
+When an endpoint generates chunked RTMP from RoQR, it <span class="bcp14">MAY</span> choose a chunk size
+and chunk boundaries appropriate for its local RTMP peer, subject to RTMP chunk
+stream rules and the Message Stream ID, Message Type, Timestamp, and Payload
+Length values carried in the RoQR frame.<a href="#section-6.3-5" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="quic-streams">
+<section id="section-6.4">
+        <h3 id="name-quic-streams">
+<a href="#section-6.4" class="section-number selfRef">6.4. </a><a href="#name-quic-streams" class="section-name selfRef">QUIC Streams</a>
+        </h3>
+<p id="section-6.4-1">When RoQR frames are sent over QUIC streams, the sender writes one or more RoQR
 frames to a unidirectional or bidirectional QUIC stream.  Each frame is
 self-delimiting because it contains a Payload Length field.  A receiver <span class="bcp14">MUST</span>
 process complete frames in the order received on a stream.  If a partial frame
 is received, the receiver waits for more stream data until the frame is
-complete, the stream is reset, or the connection is closed.<a href="#section-6.3-1" class="pilcrow">¶</a></p>
-<p id="section-6.3-2">Stream delivery is appropriate for RTMP messages that require reliable delivery
+complete, the stream is reset, or the connection is closed.<a href="#section-6.4-1" class="pilcrow">¶</a></p>
+<p id="section-6.4-2">Stream delivery is appropriate for RTMP messages that require reliable delivery
 or are needed to preserve application semantics, such as command messages,
-metadata, or media that the application has chosen to deliver reliably.<a href="#section-6.3-2" class="pilcrow">¶</a></p>
+metadata, or media that the application has chosen to deliver reliably.<a href="#section-6.4-2" class="pilcrow">¶</a></p>
 </section>
 </div>
 <div id="quic-datagram-frames">
-<section id="section-6.4">
+<section id="section-6.5">
         <h3 id="name-quic-datagram-frames">
-<a href="#section-6.4" class="section-number selfRef">6.4. </a><a href="#name-quic-datagram-frames" class="section-name selfRef">QUIC DATAGRAM Frames</a>
+<a href="#section-6.5" class="section-number selfRef">6.5. </a><a href="#name-quic-datagram-frames" class="section-name selfRef">QUIC DATAGRAM Frames</a>
         </h3>
-<p id="section-6.4-1">When RoQR frames are sent in QUIC DATAGRAM frames, each QUIC DATAGRAM frame
+<p id="section-6.5-1">When RoQR frames are sent in QUIC DATAGRAM frames, each QUIC DATAGRAM frame
 <span class="bcp14">MUST</span> contain exactly one complete RoQR frame and no trailing bytes.  Because
 QUIC DATAGRAM frames are not retransmitted by QUIC, senders <span class="bcp14">SHOULD</span> use DATAGRAM
 frames only for RTMP messages where dropping an old message is preferable to
-adding latency through retransmission.<a href="#section-6.4-1" class="pilcrow">¶</a></p>
-<p id="section-6.4-2">A sender <span class="bcp14">MUST</span> ensure that the encoded RoQR frame fits within the maximum
+adding latency through retransmission.<a href="#section-6.5-1" class="pilcrow">¶</a></p>
+<p id="section-6.5-2">A sender <span class="bcp14">MUST</span> ensure that the encoded RoQR frame fits within the maximum
 DATAGRAM size available for the QUIC path and peer.  If an RTMP message payload
 does not fit in a QUIC DATAGRAM frame, the sender <span class="bcp14">MUST</span> send it over a QUIC
-stream or drop it according to application policy.<a href="#section-6.4-2" class="pilcrow">¶</a></p>
+stream or drop it according to application policy.<a href="#section-6.5-2" class="pilcrow">¶</a></p>
 </section>
 </div>
 </section>
