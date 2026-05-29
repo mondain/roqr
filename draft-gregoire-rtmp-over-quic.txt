@@ -76,22 +76,23 @@ Table of Contents
    7.  Encapsulation
      7.1.  Multiplexing
      7.2.  RoQR Frame Format
-     7.3.  Timestamp and Chunk Semantics
+     7.3.  RTMP Field Semantics
      7.4.  QUIC Streams
      7.5.  QUIC DATAGRAM Frames
    8.  Ordering and Loss Handling
    9.  RTMP Message Type Handling
    10. Choosing Streams, DATAGRAM Frames, or Both
-   11. Error Handling
-   12. 0-RTT and Connection Migration
-   13. Security Considerations
-   14. IANA Considerations
-     14.1.  Registration of the RoQR Identification String
-     14.2.  RoQR Error Codes Registry
-   15. Implementation Status
-   16. References
-     16.1.  Normative References
-     16.2.  Informative References
+   11. Congestion Control and Rate Adaptation
+   12. Error Handling
+   13. 0-RTT and Connection Migration
+   14. Security Considerations
+   15. IANA Considerations
+     15.1.  Registration of the RoQR Identification String
+     15.2.  RoQR Error Codes Registry
+   16. Implementation Status
+   17. References
+     17.1.  Normative References
+     17.2.  Informative References
    Appendix A.  Acknowledgments
    Author's Address
 
@@ -139,6 +140,8 @@ Table of Contents
 
    *  Guidance for choosing streams, DATAGRAM frames, or mixed
       operation.
+
+   *  Congestion-control and rate-adaptation guidance for RoQR senders.
 
    *  Error codes for closing RoQR connections.
 
@@ -371,19 +374,28 @@ Table of Contents
    Payload Length field contains the number of octets in the Payload
    field.
 
+   The Message Type, Message Stream ID, Chunk Stream ID, Timestamp, and
+   Payload Length fields represent RTMP message metadata after chunk
+   reassembly.  The Message Stream ID remains RTMP application state.
+   The Chunk Stream ID is preserved as metadata for implementations that
+   use chunk-stream affinity, but RoQR does not require a receiver to
+   recreate the sender's original RTMP chunk boundaries.
+
    The Payload field MUST contain exactly one complete RTMP message
    payload.  A sender MUST NOT split one RTMP message payload across
    multiple RoQR frames.  A sender MUST NOT concatenate multiple RTMP
    message payloads into one RoQR frame.  The Payload Length field MUST
    be greater than zero.
 
-7.3.  Timestamp and Chunk Semantics
+7.3.  RTMP Field Semantics
 
-   RoQR carries RTMP messages after RTMP chunk reassembly.  The RoQR
-   Timestamp field carries the RTMP message timestamp in milliseconds as
-   a QUIC variable-length integer.  It does not carry the three-octet
-   timestamp field from an RTMP chunk header, and it does not carry the
-   RTMP Extended Timestamp field as a separate field.
+   This section defines timestamp, extended timestamp, message stream,
+   chunk stream, and chunking semantics for RoQR.  RoQR carries RTMP
+   messages after RTMP chunk reassembly.  The RoQR Timestamp field
+   carries the RTMP message timestamp in milliseconds as a QUIC
+   variable-length integer.  It does not carry the three-octet timestamp
+   field from an RTMP chunk header, and it does not carry the RTMP
+   Extended Timestamp field as a separate field.
 
    When translating chunked RTMP into RoQR, an endpoint MUST resolve
    RTMP timestamp and timestamp-delta encoding, including RTMP Extended
@@ -560,6 +572,8 @@ Table of Contents
    RTMP applications can use streams, DATAGRAM frames, or both on the
    same QUIC connection.  The choice is application-specific.  Ordering
    and loss behavior for these delivery modes is described in Section 8.
+   Congestion-control and rate-adaptation considerations are described
+   in Section 11.
 
    Applications SHOULD use QUIC streams for RTMP messages that are
    required for session correctness or decoder initialization.  Examples
@@ -578,10 +592,52 @@ Table of Contents
    to receive frames for different Flow IDs over different delivery
    modes on the same QUIC connection.
 
-11.  Error Handling
+11.  Congestion Control and Rate Adaptation
+
+   RoQR relies on QUIC congestion control for network safety.  QUIC
+   endpoints perform congestion control and loss recovery as specified
+   by QUIC Recovery [RFC9002].  RoQR senders MUST treat both QUIC
+   streams and QUIC DATAGRAM frames as congestion-controlled transport.
+   QUIC DATAGRAM frames are not retransmitted by QUIC, but they remain
+   subject to QUIC congestion control, pacing, path validation, and
+   amplification limits.
+
+   An RTMP application can produce media faster than the QUIC connection
+   can send without building unacceptable latency.  When this happens, a
+   RoQR sender SHOULD adapt the application media rate or delivery
+   behavior.  Possible responses include reducing encoder bitrate,
+   dropping stale DATAGRAM-carried media before submitting it to QUIC,
+   switching selected media to a different delivery mode, or closing a
+   flow that can no longer meet application latency requirements.
+
+   Applications SHOULD avoid running a competing congestion controller
+   above QUIC.  If an application has media-rate adaptation logic, it
+   SHOULD use transport signals exposed by the QUIC implementation, such
+   as congestion window, pacing rate, bytes in flight, stream
+   backpressure, DATAGRAM send failures, observed round-trip time,
+   delivery observations, and loss observations.  Applications that
+   cannot access these signals can still bound latency by limiting per-
+   flow queues and dropping stale media before transport submission.
+
+   QUIC stream flow control and congestion control can cause reliable
+   RoQR frames to queue behind earlier stream data.  Applications that
+   carry media on streams SHOULD define a maximum useful media age.  If
+   a stream-carried media frame becomes too old to be useful before
+   delivery, an endpoint MAY reset or stop receiving the affected stream
+   with the FRAME_CANCELLED error code, as described in Section 8.
+
+   When real-time media, RTMP commands, metadata, and non-real-time
+   application data share one QUIC connection, an endpoint SHOULD define
+   priority and bandwidth-allocation policy across Flow IDs and RTMP
+   message classes.  Command and control messages that are required for
+   session correctness need reliable delivery, but they SHOULD NOT be
+   allowed to build unbounded queues that prevent the sender from
+   adapting real-time media.
+
+12.  Error Handling
 
    RoQR endpoints can close the QUIC connection with application error
-   codes from Section 14.2.  A receiver that detects malformed RoQR
+   codes from Section 15.2.  A receiver that detects malformed RoQR
    framing MAY close the connection with FRAME_ENCODING_ERROR.  A
    receiver that detects a frame for an unknown flow MAY close the
    connection with UNKNOWN_FLOW_ID.
@@ -591,7 +647,7 @@ Table of Contents
    useful when applications prefer to isolate unreliable media loss from
    the rest of the QUIC connection.
 
-12.  0-RTT and Connection Migration
+13.  0-RTT and Connection Migration
 
    RoQR endpoints MAY use QUIC 0-RTT only when the application has
    determined that the early data is safe to replay.  RTMP command
@@ -624,7 +680,7 @@ Table of Contents
    after connection migration or disable migration for sessions that
    cannot safely tolerate a path change.
 
-13.  Security Considerations
+14.  Security Considerations
 
    RoQR inherits the security properties of QUIC [RFC9000] and QUIC-TLS
    [RFC9001].  QUIC encrypts application payloads, authenticates the
@@ -694,14 +750,14 @@ Table of Contents
    when media payloads are encrypted on the wire by QUIC.
 
    0-RTT replay and connection migration considerations are described in
-   Section 12.
+   Section 13.
 
-14.  IANA Considerations
+15.  IANA Considerations
 
    This document requests registration of the roqr ALPN token and
    creates an RTMP over QUIC error code registry.
 
-14.1.  Registration of the RoQR Identification String
+15.1.  Registration of the RoQR Identification String
 
    IANA is requested to add the following entry to the "TLS Application-
    Layer Protocol Negotiation (ALPN) Protocol IDs" registry:
@@ -712,7 +768,7 @@ Table of Contents
 
    Specification:  This document
 
-14.2.  RoQR Error Codes Registry
+15.2.  RoQR Error Codes Registry
 
    IANA is requested to create a new "RTMP over QUIC Error Codes"
    registry.  The registry manages a 62-bit space.  New registrations
@@ -745,7 +801,7 @@ Table of Contents
 
                                   Table 2
 
-15.  Implementation Status
+16.  Implementation Status
 
    This section is to be removed before publishing as an RFC.
 
@@ -755,9 +811,9 @@ Table of Contents
    identifiers, and exposes Rust and Java/JNI APIs for RTMP media
    publication and reception.
 
-16.  References
+17.  References
 
-16.1.  Normative References
+17.1.  Normative References
 
    [RFC2119]  Bradner, S., "Key words for use in RFCs to Indicate
               Requirement Levels", BCP 14, RFC 2119,
@@ -787,6 +843,10 @@ Table of Contents
               QUIC", RFC 9001, DOI 10.17487/RFC9001, May 2021,
               <https://www.rfc-editor.org/rfc/rfc9001>.
 
+   [RFC9002]  Iyengar, J., Ed. and I. Swett, Ed., "QUIC Loss Detection
+              and Congestion Control", RFC 9002, DOI 10.17487/RFC9002,
+              May 2021, <https://www.rfc-editor.org/rfc/rfc9002>.
+
    [RFC9221]  Pauly, T., Kinnear, E., and D. Schinazi, "An Unreliable
               Datagram Extension to QUIC", RFC 9221,
               DOI 10.17487/RFC9221, March 2022,
@@ -795,7 +855,7 @@ Table of Contents
    [RTMP]     Adobe Systems Incorporated, "Adobe's Real Time Messaging
               Protocol", 2012, <https://rtmp.veriskope.com/docs/spec/>.
 
-16.2.  Informative References
+17.2.  Informative References
 
    [RoQ]      Engelbart, M., Ott, J., and S. Dawkins, "RTP over QUIC
               (RoQ)", Work in Progress, Internet-Draft, draft-ietf-
