@@ -354,6 +354,10 @@ complete, the stream is reset, or the connection is closed.
 Stream delivery is appropriate for RTMP messages that require reliable delivery
 or are needed to preserve application semantics, such as command messages,
 metadata, or media that the application has chosen to deliver reliably.
+Using one QUIC stream per Flow ID is a simple deployment model when the
+application needs reliable in-order processing within that flow.  Applications
+that open multiple streams for one Flow ID need an application-level reason to
+do so and need receiver behavior for cross-stream ordering.
 
 ## QUIC DATAGRAM Frames
 
@@ -367,6 +371,53 @@ A sender MUST ensure that the encoded RoQR frame fits within the maximum
 DATAGRAM size available for the QUIC path and peer.  If an RTMP message payload
 does not fit in a QUIC DATAGRAM frame, the sender MUST send it over a QUIC
 stream or drop it according to application policy.
+
+# Ordering and Loss Handling {#ordering-loss-handling}
+
+QUIC streams provide reliable ordered delivery within each stream.  RoQR does
+not impose ordering across different QUIC streams and does not impose ordering
+between QUIC streams and QUIC DATAGRAM frames.  Applications that require a
+single total order for a set of RTMP messages SHOULD send those messages on the
+same QUIC stream or define an application-level ordering rule.
+
+Within a Flow ID, a sender SHOULD preserve RTMP application order for command,
+control, metadata, and reliably delivered media messages.  A sender that sends
+messages for the same Flow ID over multiple QUIC streams MUST ensure that the
+receiver can reconstruct the application order or can safely process those
+messages without a total order.
+
+QUIC DATAGRAM frames preserve application frame boundaries but are not
+retransmitted by QUIC.  A receiver MUST be prepared for DATAGRAM-carried RoQR
+frames to be lost or delivered later than stream-carried RoQR frames for the
+same Flow ID.  A receiver MUST NOT wait indefinitely for a missing
+DATAGRAM-carried RoQR frame.
+
+A receiver that detects a gap in DATAGRAM-carried RTMP media for a Flow ID MUST
+treat the media timeline for that flow as discontinuous until it receives data
+that the application can decode without relying on the missing message.  For
+video, this normally requires a random access point and any metadata or decoder
+configuration needed to decode from that point.  For audio, this can require
+discarding or concealing missing audio data until the next usable audio frame.
+
+RTMP command, control, authorization, metadata, and decoder-configuration
+messages that are required for correct session operation SHOULD be sent over
+QUIC streams or repeated often enough that a receiver can recover after
+DATAGRAM loss.  A sender SHOULD NOT send a DATAGRAM-carried media message that
+depends on a previous DATAGRAM-carried message unless the application can
+tolerate loss of either message.
+
+If a sender uses both QUIC streams and QUIC DATAGRAM frames for one Flow ID, it
+SHOULD avoid dependencies from DATAGRAM-carried messages to later
+stream-carried messages that would increase latency.  It also SHOULD avoid
+dependencies from stream-carried messages to DATAGRAM-carried messages that can
+be lost unless the application has a recovery mechanism.
+
+If an RTMP media message sent on a QUIC stream becomes too old to be useful
+before it is completely delivered, an endpoint MAY reset or stop receiving the
+affected stream using the `FRAME_CANCELLED` error code.  This signal applies to
+the QUIC stream carrying the stale RoQR frame; it is not a request to tear down
+the RTMP application stream or retire the Flow ID unless the application also
+performs that teardown.
 
 # RTMP Message Type Handling
 
@@ -399,7 +450,8 @@ The following message type identifiers are common in RTMP media workflows:
 # Choosing Streams, DATAGRAM Frames, or Both
 
 RTMP applications can use streams, DATAGRAM frames, or both on the same QUIC
-connection.  The choice is application-specific.
+connection.  The choice is application-specific.  Ordering and loss behavior
+for these delivery modes is described in {{ordering-loss-handling}}.
 
 Applications SHOULD use QUIC streams for RTMP messages that are required for
 session correctness or decoder initialization.  Examples include command
