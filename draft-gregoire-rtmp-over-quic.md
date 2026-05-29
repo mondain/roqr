@@ -3,25 +3,20 @@ title: "RTMP over QUIC"
 abbrev: "RTMP over QUIC"
 category: exp
 
-docname: draft-gregoire-avtcore-rtmp-over-quic-latest
+docname: draft-gregoire-rtmp-over-quic-latest
 submissiontype: IETF
 number:
 date:
 consensus: false
 v: 3
-area: "Applications and Real-Time"
-workgroup: "Audio/Video Transport Core Maintenance"
+# area: "Applications and Real-Time"
 keyword:
  - RTMP
  - QUIC
  - media transport
 venue:
-  group: "Audio/Video Transport Core Maintenance"
-  type: "Working Group"
-  mail: "avt@ietf.org"
-  arch: "https://mailarchive.ietf.org/arch/browse/avt/"
   github: "mondain/roqr"
-  latest: "https://mondain.github.io/roqr/draft-gregoire-avtcore-rtmp-over-quic.html"
+  latest: "https://mondain.github.io/roqr/draft-gregoire-rtmp-over-quic.html"
 
 author:
  -

@@ -2,8 +2,8 @@
 
 This is the working area for the individual Internet-Draft, "RTMP over QUIC".
 
-* [Datatracker Page](https://datatracker.ietf.org/doc/draft-gregoire-avtcore-rtmp-over-quic)
-* [Individual Draft](https://datatracker.ietf.org/doc/html/draft-gregoire-avtcore-rtmp-over-quic)
+* [Datatracker Page](https://datatracker.ietf.org/doc/draft-gregoire-rtmp-over-quic)
+* [Individual Draft](https://datatracker.ietf.org/doc/html/draft-gregoire-rtmp-over-quic)
 
 ## Draft References
 

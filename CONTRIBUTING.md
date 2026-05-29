@@ -16,10 +16,9 @@ BCP 78, BCP 79, the TLP, and the TLP rules regarding code components.
 
 ## Working Group Information
 
-Discussion of this work is expected to occur on the
-[Audio/Video Transport Core Maintenance Working Group mailing list](mailto:avt@ietf.org)
-([archive](https://mailarchive.ietf.org/arch/browse/avt/),
-[subscribe](https://www.ietf.org/mailman/listinfo/avt)).
+Discussion of this individual draft is expected to occur through this
+repository's issue tracker until an appropriate IETF discussion venue is
+selected.
 
-Contributors are encouraged to participate in AVTCORE Working Group
-discussions in addition to opening GitHub issues or pull requests.
+Contributors are encouraged to open GitHub issues or pull requests for draft
+text and technical feedback.
