@@ -71,22 +71,23 @@ Table of Contents
    2.  Scope
    3.  Conventions and Definitions
    4.  Connection Establishment and ALPN
-   5.  Encapsulation
-     5.1.  Multiplexing
-     5.2.  RoQR Frame Format
-     5.3.  QUIC Streams
-     5.4.  QUIC DATAGRAM Frames
-   6.  RTMP Message Type Handling
-   7.  Choosing Streams, DATAGRAM Frames, or Both
-   8.  Error Handling
-   9.  Security Considerations
-   10. IANA Considerations
-     10.1.  Registration of the RoQR Identification String
-     10.2.  RoQR Error Codes Registry
-   11. Implementation Status
-   12. References
-     12.1.  Normative References
-     12.2.  Informative References
+   5.  Protocol Operation
+   6.  Encapsulation
+     6.1.  Multiplexing
+     6.2.  RoQR Frame Format
+     6.3.  QUIC Streams
+     6.4.  QUIC DATAGRAM Frames
+   7.  RTMP Message Type Handling
+   8.  Choosing Streams, DATAGRAM Frames, or Both
+   9.  Error Handling
+   10. Security Considerations
+   11. IANA Considerations
+     11.1.  Registration of the RoQR Identification String
+     11.2.  RoQR Error Codes Registry
+   12. Implementation Status
+   13. References
+     13.1.  Normative References
+     13.2.  Informative References
    Appendix A.  Acknowledgments
    Author's Address
 
@@ -121,6 +122,9 @@ Table of Contents
 
    *  A flow identifier used to multiplex RTMP flows on one QUIC
       connection.
+
+   *  Protocol operation for creating, using, retiring, and rejecting
+      Flow IDs.
 
    *  A common RoQR frame format for QUIC streams and QUIC DATAGRAM
       frames.
@@ -174,7 +178,7 @@ Table of Contents
    Flow ID:  A QUIC variable-length integer that identifies the flow
       associated with a RoQR frame.
 
-   RoQR frame:  The RoQR application frame defined in Section 5.2.
+   RoQR frame:  The RoQR application frame defined in Section 6.2.
 
 4.  Connection Establishment and ALPN
 
@@ -193,27 +197,84 @@ Table of Contents
    DATAGRAM extension is not negotiated, endpoints MUST use QUIC streams
    for RoQR frames.
 
-5.  Encapsulation
+5.  Protocol Operation
+
+   RoQR uses Adobe RTMP semantics for what an RTMP application flow
+   represents and uses QUIC transport behavior for how that flow is
+   carried.  There is no RTMP RFC that defines a newer application
+   lifecycle for RTMP streams; RoQR therefore preserves RTMP message-
+   stream semantics from [RTMP] and adds a QUIC-facing Flow ID only for
+   multiplexing RoQR frames on one QUIC connection.
+
+   Flow ID 0 is the default RTMP session flow.  Endpoints MAY use only
+   Flow ID 0 when they do not need to separate independent RTMP
+   publications, subscriptions, control traffic, or media paths.  RTMP
+   command and control messages that establish connection state, create
+   streams, publish media, play media, or tear down streams can be
+   carried on Flow ID 0.
+
+   Additional Flow IDs are created by RTMP application state.  A Flow ID
+   can be bound to an RTMP stream name, an RTMP message stream ID, a
+   successful publish or play operation, or other local session state
+   agreed by the application.  RoQR does not define new RTMP command
+   syntax for announcing Flow IDs.  If an application needs to signal
+   the association explicitly, it does so using its existing RTMP
+   command or control model, or by an out-of-band mechanism.
+
+   Any command or control exchange that binds a Flow ID to RTMP
+   application state SHOULD be delivered reliably before DATAGRAM-
+   carried media is sent on that Flow ID.  A sender SHOULD NOT send
+   DATAGRAM-carried media for a Flow ID until it has reason to believe
+   that the receiver can associate that Flow ID with the corresponding
+   RTMP application state.
+
+   If an endpoint receives a RoQR frame for a Flow ID that it cannot
+   associate with RTMP application state, the endpoint MAY buffer a
+   bounded amount of data for that Flow ID, drop DATAGRAM-carried frames
+   for that Flow ID, or close the connection with UNKNOWN_FLOW_ID.
+   Implementations that buffer unknown-flow data MUST bound both the
+   number of buffered frames and the number of buffered octets.  If the
+   unknown data is carried on a QUIC stream and the buffering limit is
+   exceeded, the receiver SHOULD stop receiving the affected stream with
+   the UNKNOWN_FLOW_ID error code.  If the unknown data is carried in
+   QUIC DATAGRAM frames and the buffering limit is exceeded, the
+   receiver SHOULD drop excess DATAGRAM frames.
+
+   The lifetime of a Flow ID follows the RTMP application state to which
+   it is bound.  A Flow ID is active while the corresponding RTMP
+   connection, stream, publication, subscription, or media path is
+   active.  A Flow ID is retired when the corresponding RTMP application
+   state ends, such as through unpublish, closeStream, deleteStream,
+   connection close, or application policy.
+
+   A Flow ID MUST NOT be reused for unrelated RTMP media while old
+   frames for the previous use of that Flow ID can still arrive.  For
+   DATAGRAM-carried flows, an endpoint SHOULD either use monotonically
+   increasing Flow IDs within a QUIC connection or wait for an
+   application-defined drain interval before reuse.  For stream-carried
+   flows, an endpoint SHOULD wait until reliable stream data for the
+   previous use has been consumed or reset before reuse.
+
+   The RTMP message stream ID remains RTMP application state.  RoQR Flow
+   IDs do not replace RTMP message stream IDs and do not change RTMP
+   command, control, audio, video, data, shared-object, or aggregate
+   message semantics.
+
+6.  Encapsulation
 
    RoQR uses the same RoQR frame format for both QUIC streams and QUIC
    DATAGRAM frames.  The frame identifies a flow, carries RTMP message
    metadata, and then carries one complete RTMP message payload.
 
-5.1.  Multiplexing
+6.1.  Multiplexing
 
    Every RoQR frame starts with a Flow ID.  The Flow ID is a QUIC
-   variable-length integer.  Flow ID 0 is the default RTMP flow.  Other
-   Flow ID values are application-defined and can be used to separate
-   publications, subscriptions, control-related messages, media-related
-   messages, or other RTMP application units.
+   variable-length integer.  Flow ID lifecycle is defined in Section 5.
 
    An endpoint MUST associate each received RoQR frame with the Flow ID
-   encoded in that frame.  If an endpoint receives a frame for an
-   unknown Flow ID, it MAY buffer the frame until the application
-   creates that flow, drop the frame, or close the connection with the
-   UNKNOWN_FLOW_ID error code.
+   encoded in that frame.
 
-5.2.  RoQR Frame Format
+6.2.  RoQR Frame Format
 
    The RoQR frame format is:
 
@@ -258,7 +319,7 @@ Table of Contents
    message payloads into one RoQR frame.  The Payload Length field MUST
    be greater than zero.
 
-5.3.  QUIC Streams
+6.3.  QUIC Streams
 
    When RoQR frames are sent over QUIC streams, the sender writes one or
    more RoQR frames to a unidirectional or bidirectional QUIC stream.
@@ -273,7 +334,7 @@ Table of Contents
    such as command messages, metadata, or media that the application has
    chosen to deliver reliably.
 
-5.4.  QUIC DATAGRAM Frames
+6.4.  QUIC DATAGRAM Frames
 
    When RoQR frames are sent in QUIC DATAGRAM frames, each QUIC DATAGRAM
    frame MUST contain exactly one complete RoQR frame and no trailing
@@ -288,7 +349,7 @@ Table of Contents
    sender MUST send it over a QUIC stream or drop it according to
    application policy.
 
-6.  RTMP Message Type Handling
+7.  RTMP Message Type Handling
 
    RoQR preserves the RTMP message type identifier.  Receivers MUST pass
    unknown message type identifiers to the application together with the
@@ -335,7 +396,7 @@ Table of Contents
 
                                  Table 1
 
-7.  Choosing Streams, DATAGRAM Frames, or Both
+8.  Choosing Streams, DATAGRAM Frames, or Both
 
    RTMP applications can use streams, DATAGRAM frames, or both on the
    same QUIC connection.  The choice is application-specific.
@@ -357,10 +418,10 @@ Table of Contents
    to receive frames for different Flow IDs over different delivery
    modes on the same QUIC connection.
 
-8.  Error Handling
+9.  Error Handling
 
    RoQR endpoints can close the QUIC connection with application error
-   codes from Section 10.2.  A receiver that detects malformed RoQR
+   codes from Section 11.2.  A receiver that detects malformed RoQR
    framing MAY close the connection with FRAME_ENCODING_ERROR.  A
    receiver that detects a frame for an unknown flow MAY close the
    connection with UNKNOWN_FLOW_ID.
@@ -370,7 +431,7 @@ Table of Contents
    useful when applications prefer to isolate unreliable media loss from
    the rest of the QUIC connection.
 
-9.  Security Considerations
+10.  Security Considerations
 
    RoQR inherits the security properties of QUIC [RFC9000] and QUIC-TLS
    [RFC9001].  QUIC encrypts application payloads and authenticates the
@@ -387,12 +448,12 @@ Table of Contents
    does not cause unsafe parser state, unbounded buffering, or resource
    exhaustion.
 
-10.  IANA Considerations
+11.  IANA Considerations
 
    This document requests registration of the roqr ALPN token and
    creates an RTMP over QUIC error code registry.
 
-10.1.  Registration of the RoQR Identification String
+11.1.  Registration of the RoQR Identification String
 
    IANA is requested to add the following entry to the "TLS Application-
    Layer Protocol Negotiation (ALPN) Protocol IDs" registry:
@@ -403,7 +464,7 @@ Table of Contents
 
    Specification:  This document
 
-10.2.  RoQR Error Codes Registry
+11.2.  RoQR Error Codes Registry
 
    IANA is requested to create a new "RTMP over QUIC Error Codes"
    registry.  The registry manages a 62-bit space.  New registrations
@@ -436,7 +497,7 @@ Table of Contents
 
                                   Table 2
 
-11.  Implementation Status
+12.  Implementation Status
 
    This section is to be removed before publishing as an RFC.
 
@@ -446,9 +507,9 @@ Table of Contents
    identifiers, and exposes Rust and Java/JNI APIs for RTMP media
    publication and reception.
 
-12.  References
+13.  References
 
-12.1.  Normative References
+13.1.  Normative References
 
    [RFC2119]  Bradner, S., "Key words for use in RFCs to Indicate
               Requirement Levels", BCP 14, RFC 2119,
@@ -486,7 +547,7 @@ Table of Contents
    [RTMP]     Adobe Systems Incorporated, "Adobe's Real Time Messaging
               Protocol", 2012, <https://rtmp.veriskope.com/docs/spec/>.
 
-12.2.  Informative References
+13.2.  Informative References
 
    [RoQ]      Engelbart, M., Ott, J., and S. Dawkins, "RTP over QUIC
               (RoQ)", Work in Progress, Internet-Draft, draft-ietf-
