@@ -4,8 +4,8 @@
 
 Network Working Group                                        P. Gregoire
 Internet-Draft                                                      Red5
-Intended status: Experimental                                28 May 2026
-Expires: 29 November 2026
+Intended status: Experimental                                29 May 2026
+Expires: 30 November 2026
 
 
                              RTMP over QUIC
@@ -49,7 +49,7 @@ Status of This Memo
    time.  It is inappropriate to use Internet-Drafts as reference
    material or to cite them other than as "work in progress."
 
-   This Internet-Draft will expire on 29 November 2026.
+   This Internet-Draft will expire on 30 November 2026.
 
 Copyright Notice
 
