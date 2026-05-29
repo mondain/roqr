@@ -80,6 +80,7 @@ This specification defines:
 * QUIC connection establishment and ALPN use for RoQR.
 * A flow identifier used to multiplex RTMP flows on one QUIC connection.
 * Protocol operation for creating, using, retiring, and rejecting Flow IDs.
+* RTMP session handling over QUIC streams and QUIC DATAGRAM frames.
 * A common RoQR frame format for QUIC streams and QUIC DATAGRAM frames.
 * Receiver behavior for decoding RTMP message metadata and payloads.
 * Guidance for choosing streams, DATAGRAM frames, or mixed operation.
@@ -194,6 +195,52 @@ the previous use has been consumed or reset before reuse.
 The RTMP message stream ID remains RTMP application state.  RoQR Flow IDs do
 not replace RTMP message stream IDs and do not change RTMP command, control,
 audio, video, data, shared-object, or aggregate message semantics.
+
+# RTMP Session Handling {#rtmp-session-handling}
+
+RoQR carries RTMP application messages over a QUIC connection.  The QUIC
+handshake and `roqr` ALPN negotiation replace the need for an RTMP transport
+handshake on the RoQR connection.  Endpoints MUST NOT send the RTMP C0, C1,
+C2, S0, S1, or S2 handshake octets as RoQR frames unless an application is
+explicitly tunneling a legacy RTMP byte stream as payload data, which is
+outside the scope of this mapping.
+
+RTMP command messages, including commands such as `connect`, `createStream`,
+`publish`, `play`, `closeStream`, and `deleteStream`, retain their RTMP command
+semantics when carried by RoQR.  RoQR does not define new AMF command syntax
+and does not change RTMP transaction identifiers, command object contents,
+stream names, or application-specific command arguments.
+
+RTMP command and control messages that establish or mutate session state SHOULD
+be sent over QUIC streams.  This includes connection establishment commands,
+stream creation commands, publication and subscription commands, stream
+teardown commands, user control messages, acknowledgements, peer bandwidth
+messages, and application-specific commands that affect authorization or stream
+state.  A receiver MUST process these messages according to the RTMP
+application semantics associated with their Message Type and Message Stream ID.
+
+RTMP audio, video, data, shared-object, and aggregate messages are associated
+with the RTMP Message Stream ID carried in the RoQR frame.  A sender MAY carry
+these messages on Flow ID `0`, or MAY use additional Flow IDs to separate
+publications, subscriptions, tracks, or application-defined media paths.  If a
+sender uses additional Flow IDs, the receiver needs to learn the association
+between the Flow ID and the RTMP application state before it can process media
+for that flow, as described in {{protocol-operation}}.
+
+RTMP Set Chunk Size messages do not change the RoQR frame format and do not
+cause RoQR frames to be split at RTMP chunk boundaries.  When an endpoint is
+translating between RoQR and a legacy chunked RTMP peer, Set Chunk Size affects
+only the chunked RTMP side of that translation.  Similarly, RTMP
+acknowledgement and peer-bandwidth messages remain RTMP application messages,
+but QUIC flow control, loss recovery, and congestion control govern transport
+delivery on the RoQR connection.
+
+Session state that is required before media can be decoded or interpreted
+SHOULD be delivered reliably.  Examples include metadata, codec configuration,
+authorization results, and command responses that establish a publish or play
+operation.  Latency-sensitive RTMP media messages MAY be sent in QUIC DATAGRAM
+frames only when the application can tolerate loss of those messages and can
+resynchronize the receiver after loss.
 
 # Encapsulation
 
