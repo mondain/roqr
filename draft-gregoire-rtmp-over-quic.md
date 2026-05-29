@@ -79,6 +79,7 @@ This specification defines:
 
 * QUIC connection establishment and ALPN use for RoQR.
 * A flow identifier used to multiplex RTMP flows on one QUIC connection.
+* Protocol operation for creating, using, retiring, and rejecting Flow IDs.
 * A common RoQR frame format for QUIC streams and QUIC DATAGRAM frames.
 * Receiver behavior for decoding RTMP message metadata and payloads.
 * Guidance for choosing streams, DATAGRAM frames, or mixed operation.
@@ -139,6 +140,61 @@ RoQR endpoints that intend to send RTMP messages in QUIC DATAGRAM frames MUST
 negotiate the QUIC DATAGRAM extension {{RFC9221}}.  If the DATAGRAM extension
 is not negotiated, endpoints MUST use QUIC streams for RoQR frames.
 
+# Protocol Operation {#protocol-operation}
+
+RoQR uses Adobe RTMP semantics for what an RTMP application flow represents and
+uses QUIC transport behavior for how that flow is carried.  There is no RTMP
+RFC that defines a newer application lifecycle for RTMP streams; RoQR therefore
+preserves RTMP message-stream semantics from {{RTMP}} and adds a QUIC-facing
+Flow ID only for multiplexing RoQR frames on one QUIC connection.
+
+Flow ID `0` is the default RTMP session flow.  Endpoints MAY use only Flow ID
+`0` when they do not need to separate independent RTMP publications,
+subscriptions, control traffic, or media paths.  RTMP command and control
+messages that establish connection state, create streams, publish media, play
+media, or tear down streams can be carried on Flow ID `0`.
+
+Additional Flow IDs are created by RTMP application state.  A Flow ID can be
+bound to an RTMP stream name, an RTMP message stream ID, a successful publish
+or play operation, or other local session state agreed by the application.
+RoQR does not define new RTMP command syntax for announcing Flow IDs.  If an
+application needs to signal the association explicitly, it does so using its
+existing RTMP command or control model, or by an out-of-band mechanism.
+
+Any command or control exchange that binds a Flow ID to RTMP application state
+SHOULD be delivered reliably before DATAGRAM-carried media is sent on that Flow
+ID.  A sender SHOULD NOT send DATAGRAM-carried media for a Flow ID until it has
+reason to believe that the receiver can associate that Flow ID with the
+corresponding RTMP application state.
+
+If an endpoint receives a RoQR frame for a Flow ID that it cannot associate
+with RTMP application state, the endpoint MAY buffer a bounded amount of data
+for that Flow ID, drop DATAGRAM-carried frames for that Flow ID, or close the
+connection with `UNKNOWN_FLOW_ID`.  Implementations that buffer unknown-flow
+data MUST bound both the number of buffered frames and the number of buffered
+octets.  If the unknown data is carried on a QUIC stream and the buffering
+limit is exceeded, the receiver SHOULD stop receiving the affected stream with
+the `UNKNOWN_FLOW_ID` error code.  If the unknown data is carried in QUIC
+DATAGRAM frames and the buffering limit is exceeded, the receiver SHOULD drop
+excess DATAGRAM frames.
+
+The lifetime of a Flow ID follows the RTMP application state to which it is
+bound.  A Flow ID is active while the corresponding RTMP connection, stream,
+publication, subscription, or media path is active.  A Flow ID is retired when
+the corresponding RTMP application state ends, such as through unpublish,
+closeStream, deleteStream, connection close, or application policy.
+
+A Flow ID MUST NOT be reused for unrelated RTMP media while old frames for the
+previous use of that Flow ID can still arrive.  For DATAGRAM-carried flows, an
+endpoint SHOULD either use monotonically increasing Flow IDs within a QUIC
+connection or wait for an application-defined drain interval before reuse.  For
+stream-carried flows, an endpoint SHOULD wait until reliable stream data for
+the previous use has been consumed or reset before reuse.
+
+The RTMP message stream ID remains RTMP application state.  RoQR Flow IDs do
+not replace RTMP message stream IDs and do not change RTMP command, control,
+audio, video, data, shared-object, or aggregate message semantics.
+
 # Encapsulation
 
 RoQR uses the same RoQR frame format for both QUIC streams and QUIC DATAGRAM
@@ -148,15 +204,10 @@ carries one complete RTMP message payload.
 ## Multiplexing
 
 Every RoQR frame starts with a Flow ID.  The Flow ID is a QUIC variable-length
-integer.  Flow ID `0` is the default RTMP flow.  Other Flow ID values are
-application-defined and can be used to separate publications, subscriptions,
-control-related messages, media-related messages, or other RTMP application
-units.
+integer.  Flow ID lifecycle is defined in {{protocol-operation}}.
 
 An endpoint MUST associate each received RoQR frame with the Flow ID encoded in
-that frame.  If an endpoint receives a frame for an unknown Flow ID, it MAY
-buffer the frame until the application creates that flow, drop the frame, or
-close the connection with the `UNKNOWN_FLOW_ID` error code.
+that frame.
 
 ## RoQR Frame Format {#roqr-frame-format}
 
