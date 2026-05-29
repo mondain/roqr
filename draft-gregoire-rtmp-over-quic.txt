@@ -82,14 +82,15 @@ Table of Contents
    8.  RTMP Message Type Handling
    9.  Choosing Streams, DATAGRAM Frames, or Both
    10. Error Handling
-   11. Security Considerations
-   12. IANA Considerations
-     12.1.  Registration of the RoQR Identification String
-     12.2.  RoQR Error Codes Registry
-   13. Implementation Status
-   14. References
-     14.1.  Normative References
-     14.2.  Informative References
+   11. 0-RTT and Connection Migration
+   12. Security Considerations
+   13. IANA Considerations
+     13.1.  Registration of the RoQR Identification String
+     13.2.  RoQR Error Codes Registry
+   14. Implementation Status
+   15. References
+     15.1.  Normative References
+     15.2.  Informative References
    Appendix A.  Acknowledgments
    Author's Address
 
@@ -522,7 +523,7 @@ Table of Contents
 10.  Error Handling
 
    RoQR endpoints can close the QUIC connection with application error
-   codes from Section 12.2.  A receiver that detects malformed RoQR
+   codes from Section 13.2.  A receiver that detects malformed RoQR
    framing MAY close the connection with FRAME_ENCODING_ERROR.  A
    receiver that detects a frame for an unknown flow MAY close the
    connection with UNKNOWN_FLOW_ID.
@@ -532,29 +533,117 @@ Table of Contents
    useful when applications prefer to isolate unreliable media loss from
    the rest of the QUIC connection.
 
-11.  Security Considerations
+11.  0-RTT and Connection Migration
+
+   RoQR endpoints MAY use QUIC 0-RTT only when the application has
+   determined that the early data is safe to replay.  RTMP command
+   messages that create sessions, authorize users, publish streams, play
+   streams, delete streams, or otherwise mutate application state SHOULD
+   NOT be sent in 0-RTT unless the application has replay protection for
+   those commands.
+
+   DATAGRAM-carried media sent in 0-RTT can be replayed by an attacker
+   within the limits of QUIC early data.  Applications that permit media
+   in 0-RTT MUST ensure that replayed media cannot grant authorization,
+   corrupt persistent state, or cause unbounded resource consumption.  A
+   receiver MUST be prepared for 0-RTT rejection and for early media to
+   be unavailable if the QUIC handshake completes without accepting
+   early data.
+
+   QUIC connection migration can change the network path used by a RoQR
+   connection.  After migration, a sender SHOULD treat DATAGRAM size,
+   pacing behavior, congestion state, loss behavior, and observed round-
+   trip time as path-dependent until the QUIC implementation validates
+   the new path and exposes updated transport state.  A sender SHOULD be
+   prepared to reduce media rate, drop stale DATAGRAM-carried media
+   before transmission, or switch selected media to QUIC streams while
+   the new path is being validated.
+
+   Application authorization is bound to the RTMP application session
+   carried by the QUIC connection.  Applications that make authorization
+   or policy decisions based on client IP address, port, network
+   attachment, or other path properties MUST reevaluate those policies
+   after connection migration or disable migration for sessions that
+   cannot safely tolerate a path change.
+
+12.  Security Considerations
 
    RoQR inherits the security properties of QUIC [RFC9000] and QUIC-TLS
-   [RFC9001].  QUIC encrypts application payloads and authenticates the
-   transport connection.
+   [RFC9001].  QUIC encrypts application payloads, authenticates the
+   transport connection, provides integrity protection, provides
+   congestion control, and supports connection migration.  The security
+   considerations of QUIC, QUIC-TLS, and QUIC DATAGRAM apply to RoQR.
 
-   RTMP application payloads can contain commands, metadata, media, and
-   application-specific data.  RoQR does not add end-to-end object
-   security above QUIC.  Applications that require end-to-end media or
-   metadata protection across intermediaries need a separate
-   application-layer protection mechanism.
+   QUIC protects traffic between QUIC endpoints.  RoQR does not add end-
+   to-end object security above QUIC.  If a relay, gateway, load
+   balancer, or other intermediary terminates QUIC, that intermediary
+   can observe and modify RTMP commands, metadata, and media unless the
+   application applies a separate end-to-end protection mechanism above
+   RoQR.  Applications that rely on intermediaries MUST define which
+   intermediaries are trusted for command processing, metadata
+   inspection, media forwarding, and logging.
 
-   DATAGRAM-carried media can be lost without retransmission.
+   RTMP application payloads can contain commands, credentials,
+   authorization tokens, stream names, metadata, media, and application-
+   specific data.  These values can be sensitive even when the media
+   payload itself is not.  Endpoints and intermediaries SHOULD avoid
+   logging credentials, stream keys, authorization tokens, and
+   application command objects unless explicitly required by local
+   policy.
+
+   RTMP command messages can create sessions, publish streams, play
+   streams, tear down streams, and mutate application state.  Endpoints
+   MUST apply the same authentication, authorization, and input
+   validation to RTMP commands received over RoQR that they apply to
+   commands received over other RTMP transports.  A receiver MUST NOT
+   treat a command as authorized solely because it arrived on an
+   already-authenticated QUIC connection.
+
+   DATAGRAM-carried media can be lost or delayed without retransmission.
    Applications MUST ensure that loss of DATAGRAM-carried RTMP messages
-   does not cause unsafe parser state, unbounded buffering, or resource
-   exhaustion.
+   does not cause unsafe parser state, unbounded buffering, decoder
+   resource exhaustion, or application state corruption.  Receivers MUST
+   bound buffering for unknown Flow IDs, incomplete stream frames, and
+   media waiting for decoder resynchronization.
 
-12.  IANA Considerations
+   Attackers can attempt to exhaust resources by sending many unknown
+   Flow IDs, opening many QUIC streams, sending large payloads, sending
+   incomplete stream frames, or sending expensive RTMP commands.
+   Implementations MUST enforce local limits on active Flow IDs,
+   buffered unknown-flow data, stream count, payload size, command
+   processing, and incomplete-frame buffering.  When limits are
+   exceeded, an endpoint MAY drop DATAGRAM frames, stop affected
+   streams, or close the connection with an appropriate RoQR error code.
+
+   If an application falls back from RoQR to RTMP over TCP, RTMPS, or
+   another transport, it MUST NOT silently reduce the security policy
+   expected by the application.  In particular, fallback MUST NOT
+   disable authentication, authorization, encryption, token validation,
+   or metadata privacy requirements that were required for the RoQR
+   session.
+
+   Gateways that translate between RoQR and legacy RTMP expose a trust
+   boundary.  If the legacy RTMP side is not protected by TLS or another
+   security mechanism, commands, metadata, media, stream names, and
+   credentials can be visible or modifiable on that side of the gateway.
+   Deployments using translation gateways SHOULD document whether the
+   gateway is trusted, whether the legacy side is protected, and which
+   security properties do not cross the gateway.
+
+   Metadata visible to RoQR endpoints can reveal session structure.
+   Message types, message sizes, timing, Flow IDs, stream names, and
+   RTMP metadata can reveal information about application behavior even
+   when media payloads are encrypted on the wire by QUIC.
+
+   0-RTT replay and connection migration considerations are described in
+   Section 11.
+
+13.  IANA Considerations
 
    This document requests registration of the roqr ALPN token and
    creates an RTMP over QUIC error code registry.
 
-12.1.  Registration of the RoQR Identification String
+13.1.  Registration of the RoQR Identification String
 
    IANA is requested to add the following entry to the "TLS Application-
    Layer Protocol Negotiation (ALPN) Protocol IDs" registry:
@@ -565,7 +654,7 @@ Table of Contents
 
    Specification:  This document
 
-12.2.  RoQR Error Codes Registry
+13.2.  RoQR Error Codes Registry
 
    IANA is requested to create a new "RTMP over QUIC Error Codes"
    registry.  The registry manages a 62-bit space.  New registrations
@@ -598,7 +687,7 @@ Table of Contents
 
                                   Table 2
 
-13.  Implementation Status
+14.  Implementation Status
 
    This section is to be removed before publishing as an RFC.
 
@@ -608,9 +697,9 @@ Table of Contents
    identifiers, and exposes Rust and Java/JNI APIs for RTMP media
    publication and reception.
 
-14.  References
+15.  References
 
-14.1.  Normative References
+15.1.  Normative References
 
    [RFC2119]  Bradner, S., "Key words for use in RFCs to Indicate
               Requirement Levels", BCP 14, RFC 2119,
@@ -648,7 +737,7 @@ Table of Contents
    [RTMP]     Adobe Systems Incorporated, "Adobe's Real Time Messaging
               Protocol", 2012, <https://rtmp.veriskope.com/docs/spec/>.
 
-14.2.  Informative References
+15.2.  Informative References
 
    [RoQ]      Engelbart, M., Ott, J., and S. Dawkins, "RTP over QUIC
               (RoQ)", Work in Progress, Internet-Draft, draft-ietf-
