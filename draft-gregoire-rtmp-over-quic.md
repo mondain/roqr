@@ -428,20 +428,100 @@ DATAGRAM without closing the connection.  This behavior is useful when
 applications prefer to isolate unreliable media loss from the rest of the QUIC
 connection.
 
+# 0-RTT and Connection Migration {#zero-rtt-migration}
+
+RoQR endpoints MAY use QUIC 0-RTT only when the application has determined that
+the early data is safe to replay.  RTMP command messages that create sessions,
+authorize users, publish streams, play streams, delete streams, or otherwise
+mutate application state SHOULD NOT be sent in 0-RTT unless the application has
+replay protection for those commands.
+
+DATAGRAM-carried media sent in 0-RTT can be replayed by an attacker within the
+limits of QUIC early data.  Applications that permit media in 0-RTT MUST ensure
+that replayed media cannot grant authorization, corrupt persistent state, or
+cause unbounded resource consumption.  A receiver MUST be prepared for 0-RTT
+rejection and for early media to be unavailable if the QUIC handshake completes
+without accepting early data.
+
+QUIC connection migration can change the network path used by a RoQR
+connection.  After migration, a sender SHOULD treat DATAGRAM size, pacing
+behavior, congestion state, loss behavior, and observed round-trip time as
+path-dependent until the QUIC implementation validates the new path and exposes
+updated transport state.  A sender SHOULD be prepared to reduce media rate,
+drop stale DATAGRAM-carried media before transmission, or switch selected media
+to QUIC streams while the new path is being validated.
+
+Application authorization is bound to the RTMP application session carried by
+the QUIC connection.  Applications that make authorization or policy decisions
+based on client IP address, port, network attachment, or other path properties
+MUST reevaluate those policies after connection migration or disable migration
+for sessions that cannot safely tolerate a path change.
+
 # Security Considerations
 
 RoQR inherits the security properties of QUIC {{RFC9000}} and QUIC-TLS
-{{RFC9001}}.  QUIC encrypts application payloads and authenticates the
-transport connection.
+{{RFC9001}}.  QUIC encrypts application payloads, authenticates the transport
+connection, provides integrity protection, provides congestion control, and
+supports connection migration.  The security considerations of QUIC, QUIC-TLS,
+and QUIC DATAGRAM apply to RoQR.
 
-RTMP application payloads can contain commands, metadata, media, and
-application-specific data.  RoQR does not add end-to-end object security above
-QUIC.  Applications that require end-to-end media or metadata protection across
-intermediaries need a separate application-layer protection mechanism.
+QUIC protects traffic between QUIC endpoints.  RoQR does not add end-to-end
+object security above QUIC.  If a relay, gateway, load balancer, or other
+intermediary terminates QUIC, that intermediary can observe and modify RTMP
+commands, metadata, and media unless the application applies a separate
+end-to-end protection mechanism above RoQR.  Applications that rely on
+intermediaries MUST define which intermediaries are trusted for command
+processing, metadata inspection, media forwarding, and logging.
 
-DATAGRAM-carried media can be lost without retransmission.  Applications MUST
-ensure that loss of DATAGRAM-carried RTMP messages does not cause unsafe parser
-state, unbounded buffering, or resource exhaustion.
+RTMP application payloads can contain commands, credentials, authorization
+tokens, stream names, metadata, media, and application-specific data.  These
+values can be sensitive even when the media payload itself is not.  Endpoints
+and intermediaries SHOULD avoid logging credentials, stream keys, authorization
+tokens, and application command objects unless explicitly required by local
+policy.
+
+RTMP command messages can create sessions, publish streams, play streams, tear
+down streams, and mutate application state.  Endpoints MUST apply the same
+authentication, authorization, and input validation to RTMP commands received
+over RoQR that they apply to commands received over other RTMP transports.  A
+receiver MUST NOT treat a command as authorized solely because it arrived on an
+already-authenticated QUIC connection.
+
+DATAGRAM-carried media can be lost or delayed without retransmission.
+Applications MUST ensure that loss of DATAGRAM-carried RTMP messages does not
+cause unsafe parser state, unbounded buffering, decoder resource exhaustion, or
+application state corruption.  Receivers MUST bound buffering for unknown Flow
+IDs, incomplete stream frames, and media waiting for decoder
+resynchronization.
+
+Attackers can attempt to exhaust resources by sending many unknown Flow IDs,
+opening many QUIC streams, sending large payloads, sending incomplete stream
+frames, or sending expensive RTMP commands.  Implementations MUST enforce local
+limits on active Flow IDs, buffered unknown-flow data, stream count, payload
+size, command processing, and incomplete-frame buffering.  When limits are
+exceeded, an endpoint MAY drop DATAGRAM frames, stop affected streams, or close
+the connection with an appropriate RoQR error code.
+
+If an application falls back from RoQR to RTMP over TCP, RTMPS, or another
+transport, it MUST NOT silently reduce the security policy expected by the
+application.  In particular, fallback MUST NOT disable authentication,
+authorization, encryption, token validation, or metadata privacy requirements
+that were required for the RoQR session.
+
+Gateways that translate between RoQR and legacy RTMP expose a trust boundary.
+If the legacy RTMP side is not protected by TLS or another security mechanism,
+commands, metadata, media, stream names, and credentials can be visible or
+modifiable on that side of the gateway.  Deployments using translation
+gateways SHOULD document whether the gateway is trusted, whether the legacy
+side is protected, and which security properties do not cross the gateway.
+
+Metadata visible to RoQR endpoints can reveal session structure.  Message
+types, message sizes, timing, Flow IDs, stream names, and RTMP metadata can
+reveal information about application behavior even when media payloads are
+encrypted on the wire by QUIC.
+
+0-RTT replay and connection migration considerations are described in
+{{zero-rtt-migration}}.
 
 # IANA Considerations
 
