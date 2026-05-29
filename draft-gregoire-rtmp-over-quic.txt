@@ -79,18 +79,19 @@ Table of Contents
      7.3.  Timestamp and Chunk Semantics
      7.4.  QUIC Streams
      7.5.  QUIC DATAGRAM Frames
-   8.  RTMP Message Type Handling
-   9.  Choosing Streams, DATAGRAM Frames, or Both
-   10. Error Handling
-   11. 0-RTT and Connection Migration
-   12. Security Considerations
-   13. IANA Considerations
-     13.1.  Registration of the RoQR Identification String
-     13.2.  RoQR Error Codes Registry
-   14. Implementation Status
-   15. References
-     15.1.  Normative References
-     15.2.  Informative References
+   8.  Ordering and Loss Handling
+   9.  RTMP Message Type Handling
+   10. Choosing Streams, DATAGRAM Frames, or Both
+   11. Error Handling
+   12. 0-RTT and Connection Migration
+   13. Security Considerations
+   14. IANA Considerations
+     14.1.  Registration of the RoQR Identification String
+     14.2.  RoQR Error Codes Registry
+   15. Implementation Status
+   16. References
+     16.1.  Normative References
+     16.2.  Informative References
    Appendix A.  Acknowledgments
    Author's Address
 
@@ -434,7 +435,11 @@ Table of Contents
    Stream delivery is appropriate for RTMP messages that require
    reliable delivery or are needed to preserve application semantics,
    such as command messages, metadata, or media that the application has
-   chosen to deliver reliably.
+   chosen to deliver reliably.  Using one QUIC stream per Flow ID is a
+   simple deployment model when the application needs reliable in-order
+   processing within that flow.  Applications that open multiple streams
+   for one Flow ID need an application-level reason to do so and need
+   receiver behavior for cross-stream ordering.
 
 7.5.  QUIC DATAGRAM Frames
 
@@ -451,7 +456,59 @@ Table of Contents
    sender MUST send it over a QUIC stream or drop it according to
    application policy.
 
-8.  RTMP Message Type Handling
+8.  Ordering and Loss Handling
+
+   QUIC streams provide reliable ordered delivery within each stream.
+   RoQR does not impose ordering across different QUIC streams and does
+   not impose ordering between QUIC streams and QUIC DATAGRAM frames.
+   Applications that require a single total order for a set of RTMP
+   messages SHOULD send those messages on the same QUIC stream or define
+   an application-level ordering rule.
+
+   Within a Flow ID, a sender SHOULD preserve RTMP application order for
+   command, control, metadata, and reliably delivered media messages.  A
+   sender that sends messages for the same Flow ID over multiple QUIC
+   streams MUST ensure that the receiver can reconstruct the application
+   order or can safely process those messages without a total order.
+
+   QUIC DATAGRAM frames preserve application frame boundaries but are
+   not retransmitted by QUIC.  A receiver MUST be prepared for DATAGRAM-
+   carried RoQR frames to be lost or delivered later than stream-carried
+   RoQR frames for the same Flow ID.  A receiver MUST NOT wait
+   indefinitely for a missing DATAGRAM-carried RoQR frame.
+
+   A receiver that detects a gap in DATAGRAM-carried RTMP media for a
+   Flow ID MUST treat the media timeline for that flow as discontinuous
+   until it receives data that the application can decode without
+   relying on the missing message.  For video, this normally requires a
+   random access point and any metadata or decoder configuration needed
+   to decode from that point.  For audio, this can require discarding or
+   concealing missing audio data until the next usable audio frame.
+
+   RTMP command, control, authorization, metadata, and decoder-
+   configuration messages that are required for correct session
+   operation SHOULD be sent over QUIC streams or repeated often enough
+   that a receiver can recover after DATAGRAM loss.  A sender SHOULD NOT
+   send a DATAGRAM-carried media message that depends on a previous
+   DATAGRAM-carried message unless the application can tolerate loss of
+   either message.
+
+   If a sender uses both QUIC streams and QUIC DATAGRAM frames for one
+   Flow ID, it SHOULD avoid dependencies from DATAGRAM-carried messages
+   to later stream-carried messages that would increase latency.  It
+   also SHOULD avoid dependencies from stream-carried messages to
+   DATAGRAM-carried messages that can be lost unless the application has
+   a recovery mechanism.
+
+   If an RTMP media message sent on a QUIC stream becomes too old to be
+   useful before it is completely delivered, an endpoint MAY reset or
+   stop receiving the affected stream using the FRAME_CANCELLED error
+   code.  This signal applies to the QUIC stream carrying the stale RoQR
+   frame; it is not a request to tear down the RTMP application stream
+   or retire the Flow ID unless the application also performs that
+   teardown.
+
+9.  RTMP Message Type Handling
 
    RoQR preserves the RTMP message type identifier.  Receivers MUST pass
    unknown message type identifiers to the application together with the
@@ -498,10 +555,11 @@ Table of Contents
 
                                  Table 1
 
-9.  Choosing Streams, DATAGRAM Frames, or Both
+10.  Choosing Streams, DATAGRAM Frames, or Both
 
    RTMP applications can use streams, DATAGRAM frames, or both on the
-   same QUIC connection.  The choice is application-specific.
+   same QUIC connection.  The choice is application-specific.  Ordering
+   and loss behavior for these delivery modes is described in Section 8.
 
    Applications SHOULD use QUIC streams for RTMP messages that are
    required for session correctness or decoder initialization.  Examples
@@ -520,10 +578,10 @@ Table of Contents
    to receive frames for different Flow IDs over different delivery
    modes on the same QUIC connection.
 
-10.  Error Handling
+11.  Error Handling
 
    RoQR endpoints can close the QUIC connection with application error
-   codes from Section 13.2.  A receiver that detects malformed RoQR
+   codes from Section 14.2.  A receiver that detects malformed RoQR
    framing MAY close the connection with FRAME_ENCODING_ERROR.  A
    receiver that detects a frame for an unknown flow MAY close the
    connection with UNKNOWN_FLOW_ID.
@@ -533,7 +591,7 @@ Table of Contents
    useful when applications prefer to isolate unreliable media loss from
    the rest of the QUIC connection.
 
-11.  0-RTT and Connection Migration
+12.  0-RTT and Connection Migration
 
    RoQR endpoints MAY use QUIC 0-RTT only when the application has
    determined that the early data is safe to replay.  RTMP command
@@ -566,7 +624,7 @@ Table of Contents
    after connection migration or disable migration for sessions that
    cannot safely tolerate a path change.
 
-12.  Security Considerations
+13.  Security Considerations
 
    RoQR inherits the security properties of QUIC [RFC9000] and QUIC-TLS
    [RFC9001].  QUIC encrypts application payloads, authenticates the
@@ -636,14 +694,14 @@ Table of Contents
    when media payloads are encrypted on the wire by QUIC.
 
    0-RTT replay and connection migration considerations are described in
-   Section 11.
+   Section 12.
 
-13.  IANA Considerations
+14.  IANA Considerations
 
    This document requests registration of the roqr ALPN token and
    creates an RTMP over QUIC error code registry.
 
-13.1.  Registration of the RoQR Identification String
+14.1.  Registration of the RoQR Identification String
 
    IANA is requested to add the following entry to the "TLS Application-
    Layer Protocol Negotiation (ALPN) Protocol IDs" registry:
@@ -654,7 +712,7 @@ Table of Contents
 
    Specification:  This document
 
-13.2.  RoQR Error Codes Registry
+14.2.  RoQR Error Codes Registry
 
    IANA is requested to create a new "RTMP over QUIC Error Codes"
    registry.  The registry manages a 62-bit space.  New registrations
@@ -687,7 +745,7 @@ Table of Contents
 
                                   Table 2
 
-14.  Implementation Status
+15.  Implementation Status
 
    This section is to be removed before publishing as an RFC.
 
@@ -697,9 +755,9 @@ Table of Contents
    identifiers, and exposes Rust and Java/JNI APIs for RTMP media
    publication and reception.
 
-15.  References
+16.  References
 
-15.1.  Normative References
+16.1.  Normative References
 
    [RFC2119]  Bradner, S., "Key words for use in RFCs to Indicate
               Requirement Levels", BCP 14, RFC 2119,
@@ -737,7 +795,7 @@ Table of Contents
    [RTMP]     Adobe Systems Incorporated, "Adobe's Real Time Messaging
               Protocol", 2012, <https://rtmp.veriskope.com/docs/spec/>.
 
-15.2.  Informative References
+16.2.  Informative References
 
    [RoQ]      Engelbart, M., Ott, J., and S. Dawkins, "RTP over QUIC
               (RoQ)", Work in Progress, Internet-Draft, draft-ietf-
