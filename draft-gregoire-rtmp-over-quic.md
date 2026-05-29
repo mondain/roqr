@@ -254,6 +254,47 @@ sender MUST NOT split one RTMP message payload across multiple RoQR frames.  A
 sender MUST NOT concatenate multiple RTMP message payloads into one RoQR frame.
 The Payload Length field MUST be greater than zero.
 
+## Timestamp and Chunk Semantics {#timestamp-chunk-semantics}
+
+RoQR carries RTMP messages after RTMP chunk reassembly.  The RoQR Timestamp
+field carries the RTMP message timestamp in milliseconds as a QUIC
+variable-length integer.  It does not carry the three-octet timestamp field
+from an RTMP chunk header, and it does not carry the RTMP Extended Timestamp
+field as a separate field.
+
+When translating chunked RTMP into RoQR, an endpoint MUST resolve RTMP
+timestamp and timestamp-delta encoding, including RTMP Extended Timestamp
+fields, before encoding the RoQR frame.  If an RTMP chunk uses the extended
+timestamp mechanism because the chunk timestamp or timestamp delta is greater
+than or equal to `0xFFFFFF`, the RoQR Timestamp field carries the resulting
+complete RTMP message timestamp value.  The `0xFFFFFF` chunk-header sentinel
+MUST NOT be preserved as a sentinel in RoQR.
+
+When translating RoQR back into chunked RTMP, an endpoint reconstructs RTMP
+chunk headers according to {{RTMP}}.  If the RoQR Timestamp value or the
+timestamp delta selected for a generated RTMP chunk cannot fit in the
+three-octet RTMP chunk timestamp or timestamp-delta field, the generated RTMP
+chunk uses the RTMP Extended Timestamp field as defined by {{RTMP}}.  This
+translation is local to the RTMP chunking layer and does not change the RoQR
+wire image.
+
+RoQR frames are message-oriented.  A RoQR frame payload contains one complete
+RTMP message payload after RTMP chunk reassembly.  RTMP chunk basic headers,
+RTMP chunk message headers, extended timestamp fields, and chunk-size
+boundaries are not serialized into the RoQR Payload field.  A sender MUST NOT
+split one RTMP message payload across multiple RoQR frames for the purpose of
+preserving RTMP chunk boundaries.
+
+The RoQR Chunk Stream ID field carries the RTMP chunk stream identifier
+associated with the source RTMP message.  It is retained for implementations
+that preserve RTMP chunk-stream affinity or use chunk stream identifiers as
+part of local RTMP session state.  RoQR does not require the receiver to
+reconstruct the same RTMP chunk boundaries that were present at the sender.
+When an endpoint generates chunked RTMP from RoQR, it MAY choose a chunk size
+and chunk boundaries appropriate for its local RTMP peer, subject to RTMP chunk
+stream rules and the Message Stream ID, Message Type, Timestamp, and Payload
+Length values carried in the RoQR frame.
+
 ## QUIC Streams
 
 When RoQR frames are sent over QUIC streams, the sender writes one or more RoQR
